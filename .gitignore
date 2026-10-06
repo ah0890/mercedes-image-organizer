@@ -1,0 +1,16 @@
+# Generated outputs
+Mercedes_Organized/
+missing_mercedes_images*.xlsx
+processing_report.txt
+mercedes_organizer.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
