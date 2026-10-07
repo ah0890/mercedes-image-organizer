@@ -3,6 +3,8 @@ Mercedes_Organized/
 missing_mercedes_images*.xlsx
 processing_report.txt
 mercedes_organizer.log
+view_category_segmentation_report*.xlsx
+view_category_segmentation.log
 
 # Python
 __pycache__/

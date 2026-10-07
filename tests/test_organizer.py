@@ -249,6 +249,62 @@ class NotMatchedSegregationTest(unittest.TestCase):
             case.close()
 
 
+class ViewSegregationTest(unittest.TestCase):
+    def test_detection_variants(self):
+        from mercedes_organizer.view_categories import detect, enabled_categories
+        on = enabled_categories()
+        self.assertEqual([c.folder for c in on], ["45 Angle Front View"])
+        for name in ["A180-45-angle-front-view.webp", "A180_45_angle_front_view.webp", "C200-45-Angle-Front-View.webp",
+                     "Mercedes-A-Class-45-angle-front-view.webp", "45-angle-front-view.webp", "x 45 Angle Front View.webp"]:
+            self.assertEqual(detect(name, on)[0].folder, "45 Angle Front View", name)
+        for name in ["A200-side-view.webp", "C300-front-view.webp", "w145-angle-front-view.webp", "45-angle-front-viewer.webp"]:
+            self.assertIsNone(detect(name, on), name)
+
+    def test_moves_inside_class_only_and_rerun_is_safe(self):
+        import segregate_views as sv
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "Mercedes_Organized"
+            for rel, data in {"A-Class/A180-45-angle-front-view.webp": b"1", "A-Class/A180-back-view.webp": b"2",
+                              "C-Class/C200_45_Angle_Front_View.webp": b"3",
+                              "C-Class/45 Angle Front View/C200_45_Angle_Front_View.webp": b"other",   # collision
+                              "_Remaining/Not Matched/X-45-angle-front-view.webp": b"4"}.items():
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_bytes(data)
+            saved = (sv.PLAN, sv.REPORT, sv.LOG)
+            sv.PLAN, sv.REPORT, sv.LOG = Path(tmp) / "plan.csv", Path(tmp) / "r.xlsx", Path(tmp) / "l.log"
+            try:
+                from mercedes_organizer.view_categories import enabled_categories
+                items = sv.plan(root, enabled_categories())
+                sv.write_plan(items, root, False)
+                sv.execute(root, items, False)
+                self.assertTrue((root / "A-Class/45 Angle Front View/A180-45-angle-front-view.webp").is_file())
+                self.assertTrue((root / "A-Class/A180-back-view.webp").is_file())                  # not matched: stays
+                self.assertTrue((root / "C-Class/45 Angle Front View/C200_45_Angle_Front_View (2).webp").is_file())
+                self.assertEqual((root / "C-Class/45 Angle Front View/C200_45_Angle_Front_View.webp").read_bytes(),
+                                 b"other")                                                        # never overwritten
+                self.assertTrue((root / "_Remaining/Not Matched/X-45-angle-front-view.webp").is_file())  # out of scope
+                again = sv.plan(root, enabled_categories())
+                self.assertFalse([i for i in again if i.action == "move"])
+                self.assertEqual(sum(i.status == sv.ALREADY for i in again), 3)
+            finally:
+                sv.PLAN, sv.REPORT, sv.LOG = saved
+
+    def test_main_run_keeps_view_subfolders(self):
+        case = Case({"Mercedes_A180-45-angle-front-view.webp": b"a", "Mercedes_A180-back-view.webp": b"b"})
+        try:
+            case.organize()
+            cls = case.output / "A-Class"
+            (cls / "45 Angle Front View").mkdir()
+            os.replace(cls / "Mercedes_A180-45-angle-front-view.webp",
+                       cls / "45 Angle Front View" / "Mercedes_A180-45-angle-front-view.webp")
+            again = case.organize()
+            self.assertEqual((again.copied, again.removed_stale), (0, 0))
+            self.assertTrue((cls / "45 Angle Front View" / "Mercedes_A180-45-angle-front-view.webp").is_file())
+            self.assertFalse((cls / "Mercedes_A180-45-angle-front-view.webp").exists())
+        finally:
+            case.close()
+
+
 class SecondPassTest(unittest.TestCase):
     FILES = {
         "Mercedes_A180.webp": b"a180",

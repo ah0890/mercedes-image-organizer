@@ -1,6 +1,6 @@
 # Project context: Mercedes WebP Image Organizer
 
-Read this first. It holds what you need to continue without re-reading the code or the conversation. Last updated: 2026-10-07, after the Not Matched class-name sub-sort.
+Read this first. It holds what you need to continue without re-reading the code or the conversation. Last updated: 2026-10-07, after the view sort (45 Angle Front View).
 
 ## Purpose
 - Sort the WebP images in `Mercedez Split/` into one folder per Mercedes class, using `EF_Mercedes_Full_Page_List.md` (the Engine Finders page list).
@@ -33,7 +33,7 @@ Read this first. It holds what you need to continue without re-reading the code 
 ## Output layout (`Mercedes_Organized/`). Every source file appears exactly once.
 | Folder | Files now |
 |---|---|
-| 25 class folders with files (+4 empty: CLE, GLB, GL-Class, X-Class) | 684 |
+| 23 class folders with files | 684: 171 in `<Class>/45 Angle Front View/`, 513 directly in the class folder |
 | `_Remaining/Not Matched/` | 724: 652 in 22 class subfolders (from `segregate_not_matched.py`), 72 directly inside (44 no class, 28 ambiguous) |
 | `_Remaining/Ambiguous Candidates/` | 0 |
 | `_Duplicates/` | 124 |
@@ -54,7 +54,8 @@ Results: 128 of 207 pages FOUND, 79 MISSING, 0 AMBIGUOUS. Only **CLA** is `DONE 
 - `reporter.py`: totals, reconciliation, `processing_report.txt`, terminal summary.
 - `excel_report.py`: `missing_mercedes_images.xlsx` with 6 sheets: Summary, Missing Images, Needs Review, Detailed Matching, Second Pass Recovery, Run Info. It uses short readable image names and plain-language reasons.
 - `segregate_not_matched.py` (root): optional class-name sub-sort inside `_Remaining/Not Matched/` only. Use `--dry-run` first.
-- `tests/test_organizer.py`: 24 unittest tests. Run `python -m unittest discover -s tests -t .`
+- `segregate_views.py` (root) with `mercedes_organizer/view_categories.py`: second-level sort by view inside class folders.
+- `tests/test_organizer.py`: 27 unittest tests. Run `python -m unittest discover -s tests -t .`
 
 ## History (what was done and undone)
 1. First pass built, then refined:
@@ -74,7 +75,12 @@ Results: 128 of 207 pages FOUND, 79 MISSING, 0 AMBIGUOUS. Only **CLA** is `DONE 
    - This is NOT the rolled-back feature: main class folders are untouched.
    - `organizer.organize()` treats a file found in a `Not Matched/<Class>/` subfolder as already in place.
    - `second_pass` and `folder_counts` ignore the report file (`GENERATED_REPORTS`).
-7. The user drafted a LinkedIn post about the project (client-oriented, "5 hours → 10 seconds" hook).
+7. **View sort (2026-10-07, user request).** `segregate_views.py` moved the 171 `45-angle-front-view` images into `<Class>/45 Angle Front View/`, in all 23 class folders.
+   - Categories are defined in `mercedes_organizer/view_categories.py`; only 45 Angle Front View is enabled.
+   - The undo record is `view_category_moves.csv` (appended per run).
+   - `organizer.organize()` treats any file found one subfolder down inside its own folder as already in place; this covers both the view and the Not Matched sub-sorts.
+   - Known side effect, pre-existing and left alone: `_remove_stale` deletes empty folders, so the 6 classes without images (CLE, GLB, GL-Class, X-Class, R-Class, Viano) currently have no folder.
+8. The user drafted a LinkedIn post about the project (client-oriented, "5 hours → 10 seconds" hook).
 
 ## Git
 - Commits: `83ddf64` (initial README) and `f2bc53d` "Successfully done" (user, 2026-10-06 21:50). `f2bc53d` contains the post-class-name code and `Mercedes_Organized.rar` (post-class-name state).

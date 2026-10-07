@@ -122,15 +122,22 @@ def organize(results: dict[str, list[MatchResult]], catalog: Catalog, output_roo
     stats.placed_files = len({p.file.rel_path for p in plan})
     categories = set(results)
 
-    # Files that segregate_not_matched.py moved into Not Matched/<Class>/ count as in place,
-    # so a normal run neither re-copies them flat nor removes them.
-    not_matched = output_root / REMAINING_UNMATCHED
-    in_subfolders: dict[str, list[Path]] = {}
-    if os.path.isdir(fs_path(not_matched)):
-        for sub in os.listdir(fs_path(not_matched)):
-            if os.path.isdir(fs_path(not_matched / sub)):
-                for name in os.listdir(fs_path(not_matched / sub)):
-                    in_subfolders.setdefault(name, []).append(not_matched / sub / name)
+    # A file that a follow-up tool moved one level down inside its own folder - Not Matched/<Class>/
+    # (segregate_not_matched.py) or <Class>/<View>/ (segregate_views.py) - counts as in place,
+    # so a normal run neither re-copies it flat nor removes it.
+    subfolder_index: dict[str, dict[str, list[Path]]] = {}
+
+    def in_subfolders(folder: Path) -> dict[str, list[Path]]:
+        key = os.path.normcase(str(folder))
+        if key not in subfolder_index:
+            index: dict[str, list[Path]] = {}
+            if os.path.isdir(fs_path(folder)):
+                for sub in os.listdir(fs_path(folder)):
+                    if os.path.isdir(fs_path(folder / sub)):
+                        for name in os.listdir(fs_path(folder / sub)):
+                            index.setdefault(name, []).append(folder / sub / name)
+            subfolder_index[key] = index
+        return subfolder_index[key]
 
     created: set[str] = set()
     for p in plan:
@@ -139,8 +146,8 @@ def organize(results: dict[str, list[MatchResult]], catalog: Catalog, output_roo
         if dry_run:
             stats.planned += 1
             continue
-        if p.bucket == REMAINING_UNMATCHED.as_posix() and not os.path.exists(fs_path(p.dest)):
-            segregated = next((c for c in in_subfolders.get(p.dest.name, [])
+        if not os.path.exists(fs_path(p.dest)):
+            segregated = next((c for c in in_subfolders(p.dest.parent).get(p.dest.name, [])
                                if sha256_of(c) == p.file.sha256), None)
             if segregated is not None:
                 p.dest = segregated

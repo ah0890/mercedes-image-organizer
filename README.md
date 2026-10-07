@@ -145,6 +145,30 @@ After copying, every normal run (`python main.py`) re-checks every file in `_Dup
 
 Use `--no-second-pass` to skip it. With `--dry-run` it only reports what it would move.
 
+## Optional: sort images inside each class folder by view
+
+`segregate_views.py` adds a second level inside the existing class folders. It does not change the class organisation.
+
+```bash
+python segregate_views.py --dry-run            # plan + report only
+python segregate_views.py                      # move into <Class>/45 Angle Front View/
+python segregate_views.py --also "Back View"   # also use another defined category
+```
+
+* **Which folders it works on:** class folders are discovered on disk (top-level folders of `Mercedes_Organized/` not starting with `_`). Files move only into a subfolder of **their own** class folder. `_Remaining`, `_Duplicates`, `_Unrelated Files` and the source folder are never touched.
+* **Categories** are defined once in `mercedes_organizer/view_categories.py` by their words.
+  * The folder name and a separator/case-tolerant pattern are derived from those words: `45-angle-front-view`, `45_Angle_Front_View` and `45 angle front view` all go to **`45 Angle Front View/`**.
+  * Only enabled categories are used. Now that is `45 Angle Front View`.
+  * Front View, Back View and Flat Side View (present in the file names), plus Rear View, Side View, Interior and Dashboard, are defined but switched off.
+* **Safety:**
+  * The planned moves are appended to `view_category_moves.csv`, with SHA-256 hashes, before anything moves. That file is also the undo record.
+  * Existing files are never overwritten. If the same file is already at the destination, it is left in place. A different file with the same name is moved as `name (2).webp`.
+  * Re-running reports "already organized" and moves nothing.
+* **Outputs** (project root):
+  * `view_category_segmentation_report.xlsx`, with three sheets: Movement Report, Summary, Unmatched - Not Moved;
+  * `view_category_segmentation.log`.
+* **A normal `python main.py` run keeps these subfolders.** A file found one level down inside its own folder counts as already in place.
+
 ## Optional: sub-sort `Not Matched` by class name
 
 `segregate_not_matched.py` is a separate, manual step that changes **only** `Mercedes_Organized/_Remaining/Not Matched/`:
@@ -228,11 +252,13 @@ The tests build small synthetic folders. They cover the identifier tiers (`A200`
 ```text
 main.py                         CLI entry point
 segregate_not_matched.py        optional: sub-sort Not Matched/ into class subfolders by class name
+segregate_views.py              optional: sort images inside each class folder by view (45 Angle Front View)
 mercedes_organizer/
   parser.py                     Markdown -> classes, entries, identifiers (model / number / chassis)
   catalog.py                    recursive file index: normalised names, class context, SHA-256 duplicates
   matcher.py                    identifier tiers, context checks, cross-class claims, overrides
   organizer.py                  placement plan, copying (idempotent, long-path safe), stale cleanup
+  view_categories.py            view-category registry (words -> folder name + pattern)
   second_pass.py                re-check of the leftover folders with the same rules; recovery moves
   excel_report.py               the Excel workbook (readable layout)
   reporter.py                   totals, text report, terminal summary
