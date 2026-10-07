@@ -320,31 +320,28 @@ def _summary_sheet(wb: Workbook, results, summary: RunSummary, stats: CopyStats,
     for c in summary.categories:
         missing = [r.page.raw for r in results[c.name] if r.status == MISSING]
         review = [r.page.raw for r in results[c.name] if r.status == AMBIGUOUS]
-        files = f"{c.files}" + (f"\n(+{c.class_name_files} by class name)" if c.class_name_files else "")
         rows.append([c.name, c.expected, c.found, c.missing, c.ambiguous,
-                     (c.found / c.expected) if c.expected else 0, c.status, files,
+                     (c.found / c.expected) if c.expected else 0, c.status,
                      ", ".join(missing + [f"{p} (review)" for p in review]) or "—"])
     first = row + 1
     row = _table(ws, row, ["Class", "Pages", "With images", "Missing", "Need review", "Complete",
-                           "Status", "Image files\nin folder", "Pages without an image"],
-                 rows, [17, 11, 12, 11, 12, 14, 30, 18, 80], status_col=6, filter_=False)
+                           "Status", "Pages without an image"],
+                 rows, [17, 11, 12, 11, 12, 14, 30, 90], status_col=6, filter_=False)
     last = first + len(rows) - 1
     for r_ in range(first, last + 1):
         ws.cell(r_, 6).number_format = "0%"
-        for col in (2, 3, 4, 5, 6, 8):
-            ws.cell(r_, col).alignment = Alignment(horizontal="center", vertical="top", wrap_text=True)
+        for col in (2, 3, 4, 5, 6):
+            ws.cell(r_, col).alignment = Alignment(horizontal="center", vertical="top")
     ws.conditional_formatting.add(f"F{first}:F{last}", DataBarRule(
         start_type="num", start_value=0, end_type="num", end_value=1, color="70AD47"))
     total = [f"All {len(summary.categories)} classes", summary.expected, summary.found, summary.missing,
-             summary.ambiguous, pct, f"{done} complete",
-             f"{summary.matched_files}\n(+{summary.class_name_files} by class name)"
-             if summary.class_name_files else summary.matched_files, ""]
+             summary.ambiguous, pct, f"{done} complete", ""]
     for col, v in enumerate(total, start=1):
         cell = ws.cell(last + 1, col, v)
         cell.font = _font(bold=True)
         cell.fill = BLUE
         cell.border = BORDER
-        cell.alignment = Alignment(horizontal="center" if 1 < col < 9 else "left", vertical="top", wrap_text=True)
+        cell.alignment = Alignment(horizontal="center" if 1 < col < 8 else "left", vertical="top")
     ws.cell(last + 1, 6).number_format = "0%"
     row = last + 3
 
@@ -367,9 +364,7 @@ def _summary_sheet(wb: Workbook, results, summary: RunSummary, stats: CopyStats,
     row = _section(ws, row, "Where every source file went (folder Mercedes_Organized)")
     rec = reconciliation(summary, stats)
     plain = {
-        "Class folders - matched to a page": "Images matched to a specific page of the class",
-        "Class folders - sorted by class name": "Images whose file name names the class (any spelling) but "
-                                                "that match no specific page - e.g. older generations",
+        "Class folders": "One folder per class - the images matched to its pages",
         "_Remaining/Ambiguous Candidates/": "Images that fit several classes equally - needs review",
         "_Remaining/Not Matched/": "Mercedes images that no page in the list asks for",
         "_Duplicates/": "Exact copies of an image that is already placed elsewhere",
@@ -475,52 +470,6 @@ def _detail_sheet(wb: Workbook, results, classes_with_images: set[str]) -> None:
     _page_setup(ws)
 
 
-def _class_name_sheet(wb: Workbook, results, stats: CopyStats, second) -> None:
-    ws = wb.create_sheet("Sorted by Class Name")
-    ws.sheet_properties.tabColor = "7030A0"
-    class_chassis = {cat: {c for r in rs for c in r.page.identifiers.chassis} for cat, rs in results.items()}
-    entries: list[tuple[str, str, str, str]] = []        # (class, file name, spelling found, source)
-    for p in stats.placements:
-        if p.kind == "class name":
-            entries.append((p.bucket, p.dest.name, p.variant, "Not Matched (first pass)"))
-    for r in (second.rows if second else []):
-        if r.status == RECOVERED and r.identifier.startswith("class name"):
-            entries.append((r.category, Path(r.moved_to).name, r.identifier.split("'")[1], "Not Matched (second pass)"))
-    groups: dict[tuple, list] = defaultdict(list)
-    for cat, name, variant, source in entries:
-        groups[(cat, render_key(name), variant, source)].append(name)
-    rows = []
-    for (cat, key, variant, source), names in sorted(groups.items()):
-        chassis = set(re.findall(r"(?<![a-z0-9])([a-z]{1,2}\d{3}[a-z]?)(?![a-z0-9])", key.lower()))
-        page_models = {m for r_ in results.get(cat, []) for m in r_.page.identifiers.models}
-        other = sorted(c.upper() for c in chassis - class_chassis.get(cat, set()) if c not in page_models)
-        prefixes = {p for r_ in results.get(cat, []) for p in r_.page.identifiers.prefixes}
-        models = sorted({(p + n).upper() for p, n in re.findall(r"(?<![a-z0-9])([a-z]{1,4}) ?(\d{2,3})(?=[a-z]?\b)",
-                                                                key.lower())
-                         if p in prefixes and p + n not in page_models})
-        if other:
-            why = f"Generation {', '.join(other)} is not one of the {cat} pages"
-        elif models:
-            why = f"Model {', '.join(models)} is not one of the {cat} pages"
-        else:
-            why = "Name has no model number or chassis code of a specific page"
-        rows.append([cat, f"{short_name(key)}  ({len(names)} file{'s' if len(names) != 1 else ''})",
-                     f"'{variant}'", why, source])
-    total = sum(len(v) for v in groups.values())
-    row = _title(ws, f"Sorted by Class Name – {total} file(s) moved out of Not Matched",
-                 "These images name a class from the page list (any spelling: A-Class, a class, A-Dash Class, "
-                 "G-L-E …) at the start of the file name, but no specific page matched them. They are in the "
-                 "class folder; they do not count as images for a missing page.", 5)
-    if not rows:
-        ws.cell(row, 1, "No files were sorted by class name.").font = _font(bold=True, color=GREY_TXT)
-        return
-    per_class = Counter(r[0] for r in rows)
-    rows = [[f"{r[0]}  ({per_class[r[0]]})", *r[1:]] for r in rows]
-    _table(ws, row, ["Class (images)", "Image", "Class name found as", "Why no page matched it", "Moved from"],
-           rows, [20, 80, 22, 52, 26], band_key=0, freeze=True)
-    _page_setup(ws)
-
-
 _STATUS_ORDER = {RECOVERED: 0, AMBIGUOUS: 1, DUPLICATE: 2, STILL_UNMATCHED: 3}
 
 
@@ -611,7 +560,6 @@ def write_excel(path: Path, results: dict[str, list[MatchResult]], summary: RunS
     _missing_sheet(wb, results, classes_with_images)
     _review_sheet(wb, results)
     _detail_sheet(wb, results, classes_with_images)
-    _class_name_sheet(wb, results, stats, second)
     if second is not None:
         _second_pass_sheet(wb, second)
     _run_info_sheet(wb, summary, stats, second, dry_run, inputs)

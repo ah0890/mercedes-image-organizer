@@ -1,0 +1,87 @@
+Mercedes Organizer - Rollback Report
+====================================
+Date: 2026-10-07 06:37
+
+TARGET STATE
+------------
+The output as it was immediately after the original/main classification
+(identifier matching: model -> number -> chassis) and immediately BEFORE the
+"further segregation of Remaining by class-name search" (A Class, a-dash class,
+G-L-E, ...). That state also includes the earlier second pass, which moved 0 files.
+
+EVIDENCE USED
+-------------
+1. Git: only 2 commits (83ddf64 initial README, f2bc53d 'Successfully done' at
+   2026-10-06 21:50). f2bc53d and Mercedes_Organized.zip (22:39) were both made
+   AFTER the class-name run (21:10); their archives contain the post-class-name
+   state (Not Matched = 52), so they could not be used as the target snapshot.
+2. Saved terminal output of the runs before the class-name request
+   (first pass and second pass): Class folders 684, Not Matched 724,
+   Duplicates 124, Unrelated 5, total 1,537; second pass recovered 0.
+3. The placement is deterministic. The class-name request only added
+   "step 3" to the placement plan; matching code was not touched. The exact
+   later moves were obtained by comparing the plan with and without that step:
+   672 files, every one with reason "sorted by class name", verified by SHA-256
+   against the files on disk before anything was moved.
+
+WHAT WAS DONE
+-------------
+- Backup of the complete current state BEFORE any change:
+  backup_before_rollback/  (output folder, Excel, report, log, code; MANIFEST.sha256)
+- Output: 672 files moved back from class folders to _Remaining/Not Matched/
+  (per-file list with SHA-256: rollback_moves.csv)
+- Code: class-name sorting removed (class_names.py, its use in organizer,
+  second pass, main, reports, tests and README). Copy of the removed code is
+  in backup_before_rollback/code/.
+- Reports regenerated with the restored code: the run copied 0 files and removed 0.
+
+COUNTS
+------
+Files restored to Remaining (Not Matched): 672
+Files restored to class folders:          0  (no first-pass file had been moved out of a class folder)
+Later changes reverted:                   672
+Files restored from/to Unrelated:         0  (Unrelated was never changed after the first pass: 5 files)
+Files restored from/to Duplicates:        0  (Duplicates was never changed after the first pass: 124 files)
+Files whose previous location could not be determined: 0
+
+Class folders (before rollback -> after rollback):
+    A-Class      76 ->   52   (24 reverted)
+    AMG GT       40 ->    8   (32 reverted)
+    B-Class      36 ->   16   (20 reverted)
+    C-Class     180 ->   44   (136 reverted)
+    CL            8 ->    8   (0 reverted)
+    CLA          56 ->   32   (24 reverted)
+    CLK          44 ->   28   (16 reverted)
+    CLS          52 ->   40   (12 reverted)
+    Citan        20 ->   20   (0 reverted)
+    E-Class     208 ->   76   (132 reverted)
+    G-Class      56 ->   24   (32 reverted)
+    GLA          36 ->   28   (8 reverted)
+    GLC          64 ->   28   (36 reverted)
+    GLE          40 ->   16   (24 reverted)
+    GLS          40 ->   36   (4 reverted)
+    M-Class      32 ->   28   (4 reverted)
+    R-Class      12 ->    0   (12 reverted)
+    S-Class      84 ->   24   (60 reverted)
+    SL           80 ->   56   (24 reverted)
+    SLC          20 ->    8   (12 reverted)
+    SLK          44 ->   40   (4 reverted)
+    Sprinter     36 ->   28   (8 reverted)
+    V-Class      40 ->    4   (36 reverted)
+    Viano         8 ->    0   (8 reverted)
+    Vito         44 ->   40   (4 reverted)
+
+Final folder counts: class folders 684, _Remaining/Not Matched 724,
+_Remaining/Ambiguous Candidates 0, _Duplicates 124, _Unrelated Files 5  (total 1537)
+
+VERIFICATION
+------------
+[PASS] No file deleted: same file contents before and after (SHA-256 multiset)
+[PASS] Every logged move happened (file gone from old place, present with same hash in new place)
+[PASS] Class folder counts = backup counts minus reverted moves
+[PASS] Files not involved in the reverted moves are untouched (same path, same hash)
+[PASS] Only class-name-sort moves were reverted
+[PASS] Original source folder unchanged (hash, size and mtime of all 1,537 files)
+[PASS] Folder counts equal the recorded pre-class-name run (Class folders 684, _Remaining/Not Matched/ 724, _Duplicates/ 124, _Unrelated Files/ 5)
+
+RESULT: ROLLBACK SUCCESSFUL - target state restored

@@ -26,7 +26,6 @@ class CategorySummary:
     missing: int
     ambiguous: int
     files: int
-    class_name_files: int = 0      # of `files`: sorted by class name only, not linked to a page
 
     @property
     def status(self) -> str:
@@ -53,14 +52,13 @@ class RunSummary:
     duplicates: int
     source_files: int
     output_files: int
-    class_name_files: int = 0
 
 
 def summarize(results: dict[str, list[MatchResult]], catalog: Catalog, stats: CopyStats) -> RunSummary:
     cats = [CategorySummary(
         name, len(rows),
         sum(r.status == FOUND for r in rows), sum(r.status == MISSING for r in rows),
-        sum(r.status == AMBIGUOUS for r in rows), stats.per_bucket[name], stats.class_name_files[name],
+        sum(r.status == AMBIGUOUS for r in rows), stats.per_bucket[name],
     ) for name, rows in results.items()]
     b = stats.per_bucket
     return RunSummary(
@@ -68,17 +66,13 @@ def summarize(results: dict[str, list[MatchResult]], catalog: Catalog, stats: Co
         sum(c.ambiguous for c in cats), len(catalog.webp), stats.category_files,
         b[REMAINING_AMBIGUOUS.as_posix()] + b[REMAINING_UNMATCHED.as_posix()],
         b[UNRELATED.as_posix()], b[DUPLICATES.as_posix()], stats.source_files, sum(b.values()),
-        sum(stats.class_name_files.values()),
     )
 
 
 def reconciliation(summary: RunSummary, stats: CopyStats) -> list[tuple[str, int | str, str]]:
     b = stats.per_bucket
     rows: list[tuple[str, int | str, str]] = [
-        ("Class folders - matched to a page", summary.matched_files - summary.class_name_files,
-         "images matched to a Markdown entry"),
-        ("Class folders - sorted by class name", summary.class_name_files,
-         "images whose file name starts with the class name, but that match no specific page"),
+        ("Class folders", summary.matched_files, "images matched to a Markdown entry"),
         (f"{REMAINING_AMBIGUOUS.as_posix()}/", b[REMAINING_AMBIGUOUS.as_posix()],
          "claimed equally by several classes - needs review"),
         (f"{REMAINING_UNMATCHED.as_posix()}/", b[REMAINING_UNMATCHED.as_posix()],
@@ -104,9 +98,7 @@ def summary_lines(summary: RunSummary, stats: CopyStats, dry_run: bool) -> list[
         f"Total Expected Entries:      {summary.expected}",
         f"Total WebP Images:           {summary.webp}",
         f"Entries Found:               {summary.found}",
-        f"Matched Images (copied):     {summary.matched_files - summary.class_name_files}"
-        + ("  (dry run - not copied)" if dry_run else ""),
-        f"Sorted by Class Name:        {summary.class_name_files}  (in class folders, no specific page)",
+        f"Matched Images (copied):     {summary.matched_files}" + ("  (dry run - not copied)" if dry_run else ""),
         f"Missing Entries:             {summary.missing}",
         f"Ambiguous Matches:           {summary.ambiguous}",
         f"Unrelated/Remaining Images:  {summary.unrelated + summary.remaining}"

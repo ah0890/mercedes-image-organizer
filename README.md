@@ -113,7 +113,6 @@ The workbook reads front to back, from overview to technical detail. Image files
 | **Missing Images** | Every page without an image: what was searched for, **why** it is missing in plain words, and **what you can do**. Grouped by class |
 | **Needs Review** | Pages whose images fit more than one class equally (empty when there are none) |
 | **Detailed Matching** | Every page: identifiers 1–3, result, what it was matched by, and the matched images |
-| **Sorted by Class Name** | Images placed in a class folder by their class name only, with the spelling found and why no page matched them |
 | **Second Pass Recovery** | Totals per leftover folder, then each re-checked render with its status (recovered first) |
 | **Run Info** | Technical details: paths, file counts, copy statistics |
 
@@ -125,22 +124,6 @@ The workbook reads front to back, from overview to technical detail. Image files
 | `MISSING IMAGES` | At least one entry has no image |
 | `REVIEW REQUIRED` | At least one entry is ambiguous |
 | `MISSING IMAGES + REVIEW REQUIRED` | Both of the above |
-
-## Class-name sort: emptying `Not Matched`
-
-Many images name a class from the page list but match no specific *page*: older generations (A-Class W168), coupés and estates (C-Class C205, S205), variants without a page (C43 AMG). Instead of leaving them in `_Remaining/Not Matched/`, the program puts them in their **class folder** by the class name in the file name:
-
-* **Patterns come from the Markdown class names. Nothing is hard-coded.** They are case-insensitive and ignore separators:
-  * `A-Class` also matches `a class`, `A_CLASS`, `aclass`, `A-Dash Class`, `a-dash-class` and `A DASH CLASS`.
-  * Class names of 3–4 letters may be spelled out: `GLE` also matches `G-L-E`, `G L E`, `G, L, E` and `g-dash-l-dash-e`.
-  * `AMG GT` also matches `amg-gt` and `AMGGT`.
-* **The class at the start of the file name decides.** `mercedes-benz-slc-r170 slk …` is SLC even though it mentions SLK.
-* **Unknown families stay put.** If the name starts with a family that is not in the page list (`sls amg`, `glk`, `clc-class`, `vaneo`, `vario`), the file stays in `Not Matched`. A later mention such as "sls amg **gt**" does not count.
-* **Free-form names** (`photo of my a-dash-class.webp`) are sorted only when exactly one class is named.
-* **Pages are not affected.** These images do **not** make a missing page FOUND; they are counted separately ("sorted by class name").
-* The **Sorted by Class Name** sheet lists each of these images with the spelling found and why no page matched it (for example "Generation W168 is not one of the A-Class pages" or "Model C43 is not one of the C-Class pages").
-
-Use `--no-class-name-sort` to switch this off.
 
 ## Second pass: re-checking the leftover folders
 
@@ -161,6 +144,24 @@ After copying, every normal run (`python main.py`) re-checks every file in `_Dup
 **On an unchanged output folder the second pass recovers nothing, by design.** The first pass already applied the same rules to every source file, duplicates included. The pass recovers files you **add** to a leftover folder yourself (for example a renamed `Mercedes_B200_W246.webp`), or files left behind when the output drifts from the rules. A normal re-run keeps files that do not come from the source folder, so a recovery is not undone.
 
 Use `--no-second-pass` to skip it. With `--dry-run` it only reports what it would move.
+
+## Optional: sub-sort `Not Matched` by class name
+
+`segregate_not_matched.py` is a separate, manual step that changes **only** `Mercedes_Organized/_Remaining/Not Matched/`:
+
+```bash
+python segregate_not_matched.py --dry-run   # report only
+python segregate_not_matched.py             # move files into Not Matched/<Class>/
+```
+
+* **Class names come from the Markdown headings.** The spellings are generated from them: `A-Class` also matches `A Class`, `A_Class`, `aclass`, `Class A`, `Class-A` and `Class_A`; `AMG GT` also matches `AMG-GT`, `AMG_GT` and `amggt`. Matching ignores case and respects word boundaries. Model numbers and chassis codes are **not** used.
+* **A file moves only when exactly one class matches.**
+  * If several classes match, the file is AMBIGUOUS and stays directly in `Not Matched/`.
+  * It is also AMBIGUOUS if its own family is a different one. For example, `mercedes-benz-sls amg-… sls amg gt` is an SLS, not an AMG GT.
+  * Files with no class name stay directly in `Not Matched/`.
+* **Nothing is overwritten or deleted.** If the same file is already at the destination, it is reported as DUPLICATE and left in place. A different file with the same name is moved as `name (2).webp`.
+* **The report is written to `Not Matched/class_name_segmentation_report.xlsx`**, with three sheets: Summary, Class Segmentation and Ambiguous.
+* **A normal `python main.py` run keeps these subfolders.** A file found in `Not Matched/<Class>/` counts as already in place.
 
 ## Manual decisions: `overrides.csv`
 
@@ -203,7 +204,6 @@ Options:
 --overrides PATH    manual assignments CSV        (default: overrides.csv if present)
 --keep-stale        keep files from earlier runs in the output folder
 --no-second-pass    skip re-checking _Duplicates / _Remaining / _Unrelated Files
---no-class-name-sort do not sort unmatched images into class folders by class name
 -v, --verbose       also print log detail in the terminal
 ```
 
@@ -227,12 +227,12 @@ The tests build small synthetic folders. They cover the identifier tiers (`A200`
 
 ```text
 main.py                         CLI entry point
+segregate_not_matched.py        optional: sub-sort Not Matched/ into class subfolders by class name
 mercedes_organizer/
   parser.py                     Markdown -> classes, entries, identifiers (model / number / chassis)
   catalog.py                    recursive file index: normalised names, class context, SHA-256 duplicates
   matcher.py                    identifier tiers, context checks, cross-class claims, overrides
   organizer.py                  placement plan, copying (idempotent, long-path safe), stale cleanup
-  class_names.py                class-name patterns (case, spacing, hyphen, 'dash' and spelled-out variants)
   second_pass.py                re-check of the leftover folders with the same rules; recovery moves
   excel_report.py               the Excel workbook (readable layout)
   reporter.py                   totals, text report, terminal summary

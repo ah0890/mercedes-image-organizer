@@ -2,8 +2,7 @@
 
 Placement plan:
 
-* ``<Category>/``                       images matched to an entry of that class, plus images whose
-                                         file name starts with that class name (class-name sort)
+* ``<Category>/``                       images matched to an entry of that class
 * ``_Remaining/Ambiguous Candidates/``  images claimed equally by several classes (needs review)
 * ``_Remaining/Not Matched/``           Mercedes images no Markdown entry matched
 * ``_Duplicates/``                      exact SHA-256 copies of an image placed elsewhere
@@ -26,7 +25,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .catalog import Catalog, SourceFile, sha256_of
-from .class_names import ClassNameIndex
 from .matcher import MatchResult
 from .utils import fs_path, get_logger, safe_folder_name
 
@@ -42,8 +40,6 @@ class Placement:
     dest: Path
     bucket: str                 # category name or special folder label
     reason: str = ""
-    kind: str = ""              # "page" (matched to an entry) or "class name" (sorted by class name only)
-    variant: str = ""           # class-name spelling found in the file name
 
 
 @dataclass
@@ -58,7 +54,6 @@ class CopyStats:
     source_files: int = 0
     placed_files: int = 0
     placements: list[Placement] = field(default_factory=list)
-    class_name_files: Counter = field(default_factory=Counter)   # per class, files sorted by class name
 
 
 def category_dir(output_root: Path, category: str) -> Path:
@@ -66,11 +61,9 @@ def category_dir(output_root: Path, category: str) -> Path:
 
 
 def build_plan(results: dict[str, list[MatchResult]], catalog: Catalog, output_root: Path,
-               owner: dict[str, str | None], class_index: ClassNameIndex | None = None) -> list[Placement]:
+               owner: dict[str, str | None]) -> list[Placement]:
     plan: list[Placement] = []
     placed_hashes: dict[str, str] = {}          # sha256 -> where its first copy went
-    class_hashes: dict[str, set[str]] = {c: set() for c in results}
-    taken: set[str] = set()                     # destination paths already used
 
     # 1. Class folders, one copy per distinct content.
     for category, rows in results.items():
@@ -84,10 +77,8 @@ def build_plan(results: dict[str, list[MatchResult]], catalog: Catalog, output_r
                                       f"identical to {seen_in_category[f.sha256]} (in {category}/)"))
                 continue
             seen_in_category[f.sha256] = f.rel_path
-            class_hashes[category].add(f.sha256)
             placed_hashes.setdefault(f.sha256, f"{category}/{f.name}")
-            taken.add(os.path.normcase(str(dest_dir / f.name)))
-            plan.append(Placement(f, dest_dir / f.name, category, "matched to a page", "page"))
+            plan.append(Placement(f, dest_dir / f.name, category, "matched"))
 
     # 2. Everything not copied into a class.
     assigned = {p.file.rel_path for p in plan}
@@ -108,31 +99,10 @@ def build_plan(results: dict[str, list[MatchResult]], catalog: Catalog, output_r
             plan.append(Placement(f, output_root / UNRELATED / f.rel_path, UNRELATED.as_posix(),
                                   "no Mercedes or class name in the filename"))
         else:
-            # 3. No page matched: sort by the class name in the file name, if it is a Markdown class.
-            match = class_index.classify(f.name) if class_index else None
-            if match and match.category and f.sha256 not in class_hashes[match.category]:
-                dest = _free_dest(category_dir(output_root, match.category), f.name, taken)
-                class_hashes[match.category].add(f.sha256)
-                placed_hashes[f.sha256] = f"{match.category}/{dest.name}"
-                plan.append(Placement(f, dest, match.category, f"sorted by class name ('{match.variant}')",
-                                      "class name", match.variant))
-                continue
             placed_hashes[f.sha256] = f"{REMAINING_UNMATCHED.as_posix()}/{f.name}"
-            reason = "no Markdown entry matched this file"
-            if match and not match.category:
-                reason += f"; {match.how}"
             plan.append(Placement(f, output_root / REMAINING_UNMATCHED / f.rel_path,
-                                  REMAINING_UNMATCHED.as_posix(), reason))
+                                  REMAINING_UNMATCHED.as_posix(), "no Markdown entry matched this file"))
     return plan
-
-
-def _free_dest(folder: Path, name: str, taken: set[str]) -> Path:
-    stem, suffix = os.path.splitext(name)
-    dest, n = folder / name, 2
-    while os.path.normcase(str(dest)) in taken:
-        dest, n = folder / f"{stem} ({n}){suffix}", n + 1
-    taken.add(os.path.normcase(str(dest)))
-    return dest
 
 
 def _check_paths(source: Path, output: Path) -> None:
@@ -142,26 +112,40 @@ def _check_paths(source: Path, output: Path) -> None:
 
 
 def organize(results: dict[str, list[MatchResult]], catalog: Catalog, output_root: Path,
-             owner: dict[str, str | None], dry_run: bool, clean_stale: bool = True,
-             class_index: ClassNameIndex | None = None) -> CopyStats:
+             owner: dict[str, str | None], dry_run: bool, clean_stale: bool = True) -> CopyStats:
     log = get_logger()
     _check_paths(catalog.root, output_root)
     stats = CopyStats()
-    plan = build_plan(results, catalog, output_root, owner, class_index)
+    plan = build_plan(results, catalog, output_root, owner)
     stats.placements = plan
     stats.source_files = len(catalog.files)
     stats.placed_files = len({p.file.rel_path for p in plan})
     categories = set(results)
 
+    # Files that segregate_not_matched.py moved into Not Matched/<Class>/ count as in place,
+    # so a normal run neither re-copies them flat nor removes them.
+    not_matched = output_root / REMAINING_UNMATCHED
+    in_subfolders: dict[str, list[Path]] = {}
+    if os.path.isdir(fs_path(not_matched)):
+        for sub in os.listdir(fs_path(not_matched)):
+            if os.path.isdir(fs_path(not_matched / sub)):
+                for name in os.listdir(fs_path(not_matched / sub)):
+                    in_subfolders.setdefault(name, []).append(not_matched / sub / name)
+
     created: set[str] = set()
     for p in plan:
         stats.per_bucket[p.bucket] += 1
         stats.category_files += p.bucket in categories
-        if p.kind == "class name":
-            stats.class_name_files[p.bucket] += 1
         if dry_run:
             stats.planned += 1
             continue
+        if p.bucket == REMAINING_UNMATCHED.as_posix() and not os.path.exists(fs_path(p.dest)):
+            segregated = next((c for c in in_subfolders.get(p.dest.name, [])
+                               if sha256_of(c) == p.file.sha256), None)
+            if segregated is not None:
+                p.dest = segregated
+                stats.skipped_identical += 1
+                continue
         try:
             if str(p.dest.parent) not in created:
                 os.makedirs(fs_path(p.dest.parent), exist_ok=True)

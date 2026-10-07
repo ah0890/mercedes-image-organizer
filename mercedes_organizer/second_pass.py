@@ -26,7 +26,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .catalog import Catalog, SourceFile, build_catalog
-from .class_names import ClassNameIndex
 from .matcher import MatchResult, Matcher
 from .organizer import category_dir
 from .parser import Category
@@ -34,6 +33,8 @@ from .utils import fs_path, get_logger
 
 LEFTOVER_ROOTS = ["_Duplicates", "_Remaining", "_Unrelated Files"]
 LEFTOVER_LABEL = {"_Duplicates": "Duplicates", "_Remaining": "Remaining", "_Unrelated Files": "Unrelated"}
+# Reports written into the output by other tools (segregate_not_matched.py) - not images, not counted.
+GENERATED_REPORTS = {"class_name_segmentation_report.xlsx"}
 
 RECOVERED = "RECOVERED"
 STILL_UNMATCHED = "STILL UNMATCHED"
@@ -96,8 +97,7 @@ def _free_name(folder: Path, name: str) -> Path:
 
 
 def run_second_pass(categories: list[Category], output_root: Path, overrides=None,
-                    dry_run: bool = False, max_rounds: int = 5,
-                    class_index: ClassNameIndex | None = None) -> SecondPassResult:
+                    dry_run: bool = False, max_rounds: int = 5) -> SecondPassResult:
     log = get_logger()
     result = SecondPassResult(dry_run=dry_run)
     if not output_root.is_dir():
@@ -120,22 +120,9 @@ def run_second_pass(categories: list[Category], output_root: Path, overrides=Non
         }
         all_hashes = Counter(f.sha256 for f in catalog.files)
         moved = 0
-
-        def move(f: SourceFile, row: RecoveryRow, category: str) -> None:
-            nonlocal moved
-            row.status = RECOVERED
-            dest = _free_name(category_dir(output_root, category), f.name)
-            row.moved_to = str(dest.relative_to(output_root))
-            if not dry_run:
-                os.makedirs(fs_path(dest.parent), exist_ok=True)
-                os.replace(fs_path(output_root / f.rel_path), fs_path(dest))
-            class_hashes[category].add(f.sha256)
-            moved += 1
-            log.info("RECOVERED [%s] %s -> %s via %s", row.source_folder, f.rel_path, row.moved_to, row.identifier)
-
         for f in catalog.files:
             top = _top_folder(f.rel_path)
-            if top not in LEFTOVER_ROOTS:
+            if top not in LEFTOVER_ROOTS or f.name in GENERATED_REPORTS:
                 continue
             label = LEFTOVER_LABEL[top]
             row = RecoveryRow(label, f.rel_path, f.name, STILL_UNMATCHED)
@@ -150,35 +137,28 @@ def run_second_pass(categories: list[Category], output_root: Path, overrides=Non
                     row.status = DUPLICATE
                     row.notes = f"Matches {owner}, but the same image is already in the {owner} folder"
                 else:
+                    row.status = RECOVERED
+                    dest = _free_name(category_dir(output_root, owner), f.name)
+                    row.moved_to = str(dest.relative_to(output_root))
                     row.notes = f"Moved into the {owner} folder"
-                    move(f, row, owner)
+                    if not dry_run:
+                        os.makedirs(fs_path(dest.parent), exist_ok=True)
+                        os.replace(fs_path(output_root / f.rel_path), fs_path(dest))
+                    class_hashes[owner].add(f.sha256)
+                    moved += 1
+                    log.info("RECOVERED [%s] %s -> %s via %s", label, f.rel_path, row.moved_to, row.identifier)
             elif f.is_webp and claimed:
                 row.status = AMBIGUOUS
                 row.notes = "Fits entries in more than one class equally well - needs your decision"
             elif top == "_Duplicates" and all_hashes[f.sha256] > 1:
                 row.status = DUPLICATE
                 row.notes = "Exact copy of another image - kept as a duplicate"
-            elif (class_index and f.is_webp and Path(f.rel_path).parts[:2] == ("_Remaining", "Not Matched")
-                  and (cm := class_index.classify(f.name)).category):
-                # Same class-name rule as the first pass: the class named at the start of the file name.
-                row.category, row.identifier = cm.category, f"class name '{cm.variant}'"
-                row.entries = "(class only - no specific page)"
-                if f.sha256 in class_hashes[cm.category]:
-                    row.status = DUPLICATE
-                    row.notes = f"Named {cm.category}, but the same image is already in the {cm.category} folder"
-                else:
-                    row.notes = f"Sorted into {cm.category} by its class name ({cm.how})"
-                    move(f, row, cm.category)
             else:
                 reasons = []
                 if not f.is_webp:
                     reasons.append("Not an image (WebP) file")
                 elif not f.is_mercedes:
                     reasons.append("Not a Mercedes image (no brand or class name in the file name)")
-                elif class_index and "not a class in the page list" in (cm2 := class_index.classify(f.name)).how:
-                    family = cm2.how.split("'")[1]
-                    family = family.upper() if len(family) <= 3 else family.title()
-                    reasons.append(f"Its family '{family}' is not a class in the page list")
                 elif f.foreign_class:
                     family = f.foreign_class.split()[0]
                     family = (family.upper() if len(family) <= 3 else family.capitalize()) + "-Class"
@@ -215,7 +195,7 @@ def folder_counts(output_root: Path, category_names: list[str]) -> Counter:
             continue
         top = rel.parts[0]
         key = "/".join(rel.parts[:2]) if top == "_Remaining" else top
-        counts[key] += len(files)
+        counts[key] += sum(f not in GENERATED_REPORTS for f in files)
     for name in category_names:
         counts.setdefault(category_dir(Path(), name).name, 0)
     return counts

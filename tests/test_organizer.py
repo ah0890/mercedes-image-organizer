@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -220,45 +221,30 @@ class OrganizerTest(unittest.TestCase):
         self.assertEqual(rows["A 180"].status, MISSING)
 
 
-class ClassNameTest(unittest.TestCase):
-    MD = "## A-Class — 1 pages\n- A 200 (W176)\n\n## GLE — 1 pages\n- GLE 63 AMG (W166)\n\n## SL — 1 pages\n- SL 500 (R129)\n"
+class NotMatchedSegregationTest(unittest.TestCase):
+    def test_patterns_from_class_names(self):
+        import segregate_not_matched as seg
+        pats = {c: seg.class_patterns(c) for c in ["A-Class", "B-Class", "AMG GT", "GLE", "SL", "SLC"]}
+        for name, expected in [("Mercedes_A-Class_200", ["A-Class"]), ("Mercedes_Class_A_200", ["A-Class"]),
+                               ("Mercedes_A_Class_200", ["A-Class"]), ("class-a", ["A-Class"]), ("ACLASS", ["A-Class"]),
+                               ("B-Class-220", ["B-Class"]), ("amg_gt 63", ["AMG GT"]), ("my GLE", ["GLE"]),
+                               ("data", []), ("amgx", []), ("sls", []), ("class amg", [])]:
+            found, _ = seg.classify(name + ".webp", pats)
+            self.assertEqual([c for c, _ in found], expected, name)
+        found, family = seg.classify("mercedes-benz-sls amg-c197-sls amg gt-coupe.webp", pats)
+        self.assertEqual(([c for c, _ in found], family), (["AMG GT"], "sls amg"))   # -> AMBIGUOUS in main()
 
-    def test_variants(self):
-        from mercedes_organizer.class_names import ClassNameIndex
-        idx = ClassNameIndex(["A-Class", "GLE", "SL", "AMG GT"])
-        for text, expected in [("A-Class", "A-Class"), ("a class", "A-Class"), ("a Class", "A-Class"),
-                               ("A-Dash Class", "A-Class"), ("a-dash class", "A-Class"), ("A-DASH CLASS", "A-Class"),
-                               ("A_CLASS", "A-Class"), ("G, L, E", "GLE"), ("g-l-e", "GLE"), ("Gle", "GLE"),
-                               ("AMG-Dash GT", "AMG GT"), ("sl", "SL"), ("photo of my a-dash-class", "A-Class")]:
-            self.assertEqual(idx.classify(text + ".webp").category, expected, text)
-        for text in ["mercedes-benz-sls amg-c197-sls amg gt", "mercedes-benz-glk-x204-suv", "slk", "class",
-                     "mercedes-benz-clc-class-cl203"]:
-            self.assertIsNone(idx.classify(text + ".webp").category, text)
-
-    def test_unmatched_files_sorted_by_class_name(self):
-        from mercedes_organizer.class_names import ClassNameIndex
-        files = {
-            "mercedes-benz-a-class-w168-standard-hatchback.webp": b"w168",   # A-Class, no page for W168
-            "mercedes-benz-gle-c167-coupe.webp": b"c167",                    # GLE coupe, not a page
-            "mercedes-benz-glk-x204-suv.webp": b"glk",                       # GLK not in the page list
-            "mercedes-benz-sls amg-c197-sls amg gt-coupe.webp": b"sls",     # SLS - must not go to SL/AMG GT
-        }
-        case = Case(files, self.MD)
+    def test_main_run_keeps_segregated_subfolders(self):
+        case = Case({"Mercedes_W999_A-Class.webp": b"x", "Mercedes_A180.webp": b"a"})
         try:
-            idx = ClassNameIndex([c.name for c in case.categories])
-            stats = organize(case.results, case.catalog, case.output, case.matcher.owner, False, class_index=idx)
-            out = case.output
-            self.assertTrue((out / "A-Class" / "mercedes-benz-a-class-w168-standard-hatchback.webp").is_file())
-            self.assertTrue((out / "GLE" / "mercedes-benz-gle-c167-coupe.webp").is_file())
-            self.assertTrue((out / "_Remaining" / "Not Matched" / "mercedes-benz-glk-x204-suv.webp").is_file())
-            self.assertTrue((out / "_Remaining" / "Not Matched" / "mercedes-benz-sls amg-c197-sls amg gt-coupe.webp")
-                            .is_file())
-            self.assertEqual(stats.class_name_files, {"A-Class": 1, "GLE": 1})
-            # class-name sorting does not make a page FOUND
-            self.assertEqual(case.result("A 200 (W176)").status, MISSING)
-            # a second run keeps the same placement (nothing moves back)
-            again = organize(case.results, case.catalog, case.output, case.matcher.owner, False, class_index=idx)
+            case.organize()
+            nm = case.output / "_Remaining" / "Not Matched"
+            (nm / "A-Class").mkdir()
+            os.replace(nm / "Mercedes_W999_A-Class.webp", nm / "A-Class" / "Mercedes_W999_A-Class.webp")
+            again = case.organize()
             self.assertEqual((again.copied, again.removed_stale), (0, 0))
+            self.assertTrue((nm / "A-Class" / "Mercedes_W999_A-Class.webp").is_file())
+            self.assertFalse((nm / "Mercedes_W999_A-Class.webp").exists())
         finally:
             case.close()
 

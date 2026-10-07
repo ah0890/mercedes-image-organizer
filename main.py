@@ -13,7 +13,6 @@ import time
 from pathlib import Path
 
 from mercedes_organizer.catalog import build_catalog
-from mercedes_organizer.class_names import ClassNameIndex
 from mercedes_organizer.matcher import Matcher, load_overrides
 from mercedes_organizer.organizer import organize
 from mercedes_organizer.parser import parse_markdown
@@ -39,8 +38,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                     help=f"CSV of manual assignments (default: {DEFAULT_OVERRIDES.name} if it exists)")
     ap.add_argument("--keep-stale", action="store_true",
                     help="do not remove files from earlier runs out of the generated output folder")
-    ap.add_argument("--no-class-name-sort", action="store_true",
-                    help="do not sort unmatched images into class folders by the class name in the file name")
     ap.add_argument("--no-second-pass", action="store_true",
                     help="skip re-checking _Duplicates/_Remaining/_Unrelated Files after the first pass")
     ap.add_argument("-v", "--verbose", action="store_true", help="also print detailed log lines to the terminal")
@@ -94,24 +91,19 @@ def main(argv: list[str] | None = None) -> int:
         matcher = Matcher(catalog, categories)
         results, override_problems = matcher.match_all(overrides)
 
-        class_index = None if args.no_class_name_sort else ClassNameIndex([c.name for c in categories])
         stats = organize(results, catalog, args.output, matcher.owner, args.dry_run,
-                         clean_stale=not args.keep_stale, class_index=class_index)
+                         clean_stale=not args.keep_stale)
 
         # Second pass: re-check _Duplicates, _Remaining and _Unrelated Files in the output folder.
         second = None
         found_before = sum(r.status == "FOUND" for rows in results.values() for r in rows)
         if not args.no_second_pass:
-            second = run_second_pass(categories, args.output, overrides, dry_run=args.dry_run,
-                                     class_index=class_index)
+            second = run_second_pass(categories, args.output, overrides, dry_run=args.dry_run)
             if second.results and not args.dry_run:
                 results = second.results          # matching over the output after recovery
                 on_disk = folder_counts(args.output, [c.name for c in categories])
                 stats.per_bucket = on_disk
                 stats.category_files = sum(on_disk[c.name] for c in categories)
-                for row in second.rows:
-                    if row.status == "RECOVERED" and row.identifier.startswith("class name"):
-                        stats.class_name_files[row.category] += 1
 
         summary = summarize(results, catalog, stats)
         newly_found = summary.found - found_before
